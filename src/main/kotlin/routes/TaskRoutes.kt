@@ -148,3 +148,79 @@ fun Route.taskRoutes() {
     // - POST /tasks/{id}/edit - Save edits with validation (dual-mode)
     // - GET /tasks/{id}/view - Cancel edit (HTMX only)
 }
+
+/**
+ * GET /tasks/{id}/edit - Show edit form
+ * Dual-mode: HTMX returns _edit.peb fragment, no-JS returns full page
+ */
+get("/tasks/{id}/edit") {
+    val id = call.parameters["id"]?.toIntOrNull()
+    val task = id?.let { TaskRepository.get(it) }
+
+    if (task == null) {
+        call.respond(HttpStatusCode.NotFound, "Task not found")
+        return@get
+    }
+
+    if (call.isHtmx()) {
+        // HTMX: Return just the edit form fragment
+        val html = call.renderTemplate("tasks/_edit.peb", mapOf("task" to task))
+        call.respondText(html, ContentType.Text.Html)
+    } else {
+        // No-JS: Return full page with task in edit mode
+        val html = call.renderTemplate("tasks/index.peb", mapOf(
+            "title" to "Edit Task",
+            "tasks" to TaskRepository.all(),
+            "editingTaskId" to id
+        ))
+        call.respondText(html, ContentType.Text.Html)
+    }
+}
+
+/**
+ * POST /tasks/{id}/edit - Save edits
+ * Dual-mode: HTMX returns _item.peb fragment, no-JS redirects to /tasks
+ */
+post("/tasks/{id}/edit") {
+    val id = call.parameters["id"]?.toIntOrNull()
+    val newTitle = call.receiveParameters()["title"]?.trim()
+
+    if (id == null || newTitle.isNullOrBlank()) {
+        call.respond(HttpStatusCode.BadRequest, "Invalid input")
+        return@post
+    }
+
+    val updated = TaskRepository.update(id, newTitle)
+
+    if (updated == null) {
+        call.respond(HttpStatusCode.NotFound, "Task not found")
+        return@post
+    }
+
+    if (call.isHtmx()) {
+        // HTMX: Return updated view mode + status
+        val item = call.renderTemplate("tasks/_item.peb", mapOf("task" to updated))
+        val status = """<div id="status" hx-swap-oob="true">Task updated to "${updated.title}".</div>"""
+        call.respondText(item + status, ContentType.Text.Html)
+    } else {
+        // No-JS: PRG redirect
+        call.respondRedirect("/tasks")
+    }
+}
+
+/**
+ * GET /tasks/{id}/view - Cancel edit (HTMX only)
+ * Returns task in view mode without saving changes
+ */
+get("/tasks/{id}/view") {
+    val id = call.parameters["id"]?.toIntOrNull()
+    val task = id?.let { TaskRepository.get(it) }
+
+    if (task == null) {
+        call.respond(HttpStatusCode.NotFound)
+        return@get
+    }
+
+    val html = call.renderTemplate("tasks/_item.peb", mapOf("task" to task))
+    call.respondText(html, ContentType.Text.Html)
+}
